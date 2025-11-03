@@ -6,7 +6,7 @@
 
 ## Çalıştırma (Windows PowerShell)
 ```powershell
-cd "c:\Users\LENOVO\Desktop\Aktif Projeler\tarih belirleyici"
+cd "tarih belirleyici"
 npm install
 npm run dev
 # Tarayıcı: http://localhost:3000

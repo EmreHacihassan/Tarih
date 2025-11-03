@@ -8,17 +8,28 @@ const MINUTE_PX = 1;
 
 let LAST_EVENTS = [];
 
+/* -------- Time helpers -------- */
 function toMinutes(hhmm) {
   const [h, m] = (hhmm || '').split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
 }
-
 function toHHMM(min) {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
+function normalizeTime(str) {
+  // Accept "9", "9:0", "09:00" -> "HH:MM"
+  if (!str) return null;
+  const s = String(str).trim();
+  const m1 = /^(\d{1,2}):?(\d{0,2})$/.exec(s);
+  if (!m1) return null;
+  const h = Math.max(0, Math.min(23, parseInt(m1[1],10)));
+  const mm = m1[2] ? Math.max(0, Math.min(59, parseInt(m1[2],10))) : 0;
+  return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+}
 
+/* -------- Intervals drawing -------- */
 function mergeIntervals(intervals) {
   if (!intervals.length) return [];
   const sorted = intervals.slice().sort((a,b) => a.startMin - b.startMin);
@@ -78,9 +89,7 @@ async function fetchEvents() {
 }
 
 function drawBlocks(events) {
-  // Gün bazında union blokları çiz
   const perDay = Array.from({ length: 7 }, () => []);
-
   for (const evt of events) {
     const startMin = toMinutes(evt.start);
     const endMin = toMinutes(evt.end);
@@ -94,7 +103,6 @@ function drawBlocks(events) {
     const col = grid.children[d];
     const timeline = col.querySelector('.timeline');
 
-    // Eski blokları temizle
     Array.from(timeline.querySelectorAll('.block')).forEach(n => n.remove());
 
     const merged = mergeIntervals(perDay[d]);
@@ -117,11 +125,10 @@ function drawBlocks(events) {
   }
 }
 
+/* -------- Event list (optional UI) -------- */
 function ensureEventListContainer() {
   let list = document.getElementById('eventList');
   if (list) return list;
-
-  // controls alanının içine ekle
   const controls = document.querySelector('.controls');
   list = document.createElement('div');
   list.id = 'eventList';
@@ -145,7 +152,6 @@ function ensureEventListContainer() {
 
 function renderEventList(events) {
   const list = ensureEventListContainer();
-  // Başlık dışındaki içerikleri temizle
   Array.from(list.children).forEach((ch, idx) => { if (idx > 0) ch.remove(); });
 
   if (!events.length) {
@@ -156,7 +162,6 @@ function renderEventList(events) {
     return;
   }
 
-  // Gün + start sıralı
   const sorted = events.slice().sort((a, b) => {
     if (a.day !== b.day) return a.day - b.day;
     return toMinutes(a.start) - toMinutes(b.start);
@@ -196,7 +201,6 @@ function renderEventList(events) {
     del.style.color = '#900';
     del.style.borderRadius = '6px';
     del.style.cursor = 'pointer';
-
     del.addEventListener('click', async () => {
       const ok = confirm(`${DAYS_TR[e.day]} ${e.start}-${e.end} (${e.name}) kaydını silmek istediğinize emin misiniz?`);
       if (!ok) return;
@@ -220,6 +224,144 @@ function renderEventList(events) {
   list.appendChild(ul);
 }
 
+/* -------- CSV import (client-side) -------- */
+function mapDay(value) {
+  if (value == null) return null;
+  const v = String(value).trim().toLowerCase();
+  if (/^\d+$/.test(v)) {
+    const n = parseInt(v, 10);
+    return (n >= 0 && n <= 6) ? n : null;
+  }
+  const map = {
+    'pazartesi': 0, 'pzt': 0,
+    'salı': 1, 'sali': 1,
+    'çarşamba': 2, 'carsamba': 2, 'çarsamba': 2, 'crs': 2,
+    'perşembe': 3, 'persembe': 3, 'prs': 3,
+    'cuma': 4,
+    'cumartesi': 5, 'cts': 5,
+    'pazar': 6
+  };
+  if (v in map) return map[v];
+  // English fallback
+  const mapEn = {
+    'monday':0,'tuesday':1,'wednesday':2,'thursday':3,'friday':4,'saturday':5,'sunday':6,
+    'mon':0,'tue':1,'wed':2,'thu':3,'fri':4,'sat':5,'sun':6
+  };
+  return (v in mapEn) ? mapEn[v] : null;
+}
+
+function parseCSV(text) {
+  // Simple CSV parser with quote support
+  const rows = [];
+  let i = 0, field = '', row = [], inQuotes = false;
+  const pushField = () => { row.push(field); field=''; };
+  const pushRow = () => { rows.push(row); row=[]; };
+  while (i < text.length) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i+1] === '"') { field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      } else { field += c; i++; continue; }
+    } else {
+      if (c === '"') { inQuotes = true; i++; continue; }
+      if (c === ',') { pushField(); i++; continue; }
+      if (c === '\r') { i++; continue; }
+      if (c === '\n') { pushField(); pushRow(); i++; continue; }
+      field += c; i++; continue;
+    }
+  }
+  // flush last field/row
+  pushField();
+  pushRow();
+  // remove trailing empty last row if file ends with newline
+  if (rows.length && rows[rows.length-1].every(v => v === '')) rows.pop();
+  return rows;
+}
+
+function rowsToEvents(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const idx = {
+    name: header.findIndex(h => ['name','isim','kişi','kisi','person'].includes(h)),
+    day: header.findIndex(h => ['day','gun','gün','dayname'].includes(h)),
+    start: header.findIndex(h => ['start','baslangic','başlangıç','from','start_time'].includes(h)),
+    end: header.findIndex(h => ['end','bitis','bitiş','to','end_time'].includes(h)),
+  };
+  const events = [];
+  for (let r = 1; r < rows.length; r++) {
+    const rec = rows[r];
+    const name = idx.name >= 0 ? rec[idx.name]?.trim() : '';
+    const dayRaw = idx.day >= 0 ? rec[idx.day] : null;
+    const day = mapDay(dayRaw);
+    const start = normalizeTime(idx.start >= 0 ? rec[idx.start] : null);
+    const end = normalizeTime(idx.end >= 0 ? rec[idx.end] : null);
+    if (!name || day == null || !start || !end) continue;
+    if (toMinutes(end) <= toMinutes(start)) continue;
+    events.push({ name, day, start, end });
+  }
+  return events;
+}
+
+function setupImportUI() {
+  const input = document.getElementById('csvFile');
+  const btn = document.getElementById('importBtn');
+  const sample = document.getElementById('sampleCsv');
+
+  // Sample CSV download
+  const sampleCsv = [
+    'name,day,start,end',
+    'Ayşe,0,09:00,10:00',
+    'Ali,Salı,13:30,15:00',
+    'Zeynep,çarşamba,08:15,09:45'
+  ].join('\n');
+  sample.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(sampleCsv);
+  sample.download = 'ornek_takvim.csv';
+
+  btn?.addEventListener('click', async () => {
+    if (!input?.files?.length) {
+      alert('Lütfen bir CSV dosyası seçin.');
+      return;
+    }
+    const file = input.files[0];
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const events = rowsToEvents(rows);
+
+      if (!events.length) {
+        alert('Uygun satır bulunamadı. Başlıklar: name, day (0..6 veya gün adı), start, end');
+        return;
+      }
+
+      const confirmMsg = `${file.name} dosyasından ${events.length} kayıt içe aktarılacak. Onaylıyor musunuz?`;
+      if (!confirm(confirmMsg)) return;
+
+      let ok = 0, fail = 0;
+      for (const e of events) {
+        try {
+          const r = await fetch(`${API_BASE}/api/events`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(e)
+          });
+          if (!r.ok) throw new Error('POST hatası');
+          ok++;
+        } catch {
+          fail++;
+        }
+      }
+      await refresh();
+      alert(`İçe aktarma tamamlandı. Başarılı: ${ok}, Hatalı: ${fail}`);
+      input.value = '';
+    } catch (err) {
+      console.error(err);
+      alert('CSV okunamadı veya işlenemedi.');
+    }
+  });
+}
+
+/* -------- App lifecycle -------- */
 async function refresh() {
   const events = await fetchEvents();
   LAST_EVENTS = events;
@@ -229,6 +371,7 @@ async function refresh() {
 
 function setupForm() {
   const form = document.getElementById('addForm');
+  if (!form) return;
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const name = document.getElementById('name').value.trim();
@@ -251,7 +394,6 @@ function setupForm() {
         const msg = json && json.errors ? json.errors.join(', ') : 'Kayıt hatası';
         throw new Error(msg);
       }
-      // Temizle ve yenile
       document.getElementById('start').value = '09:00';
       document.getElementById('end').value = '10:00';
       await refresh();
@@ -264,6 +406,7 @@ function setupForm() {
 async function main() {
   buildColumns();
   setupForm();
+  setupImportUI();
   await refresh();
 }
 

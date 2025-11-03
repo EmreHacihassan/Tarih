@@ -96,9 +96,20 @@
 
         <button type="submit" class="btn">Ders Saatini Ekle</button>
       </form>
+
       <div class="legend">
         <span class="legend-box green"></span> Boş
         <span class="legend-box red"></span> Dolu (ders)
+      </div>
+
+      <!-- CSV import panel -->
+      <div class="importer">
+        <div class="field">
+          <label for="csvFile">CSV içe aktar</label>
+          <input type="file" id="csvFile" accept=".csv" />
+        </div>
+        <button type="button" class="btn" id="importBtn" title="CSV dosyasını içe aktar">İçe aktar</button>
+        <a href="#" id="sampleCsv" class="sample-link" title="Örnek CSV indir">Örnek CSV</a>
       </div>
     </section>
 

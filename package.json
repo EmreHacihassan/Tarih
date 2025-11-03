@@ -1,0 +1,18 @@
+{
+  "name": "tarih-belirleyici",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ekip ortak boş saat belirleme aracı (dosya tabanlı).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

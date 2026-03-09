@@ -361,6 +361,59 @@ function setupImportUI() {
   });
 }
 
+function csvEscape(value) {
+  const s = String(value ?? '');
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function setupExportUI() {
+  const btn = document.getElementById('exportBtn');
+  if (!btn) return;
+
+  btn.addEventListener('click', () => {
+    if (!LAST_EVENTS.length) {
+      alert('Dışa aktarılacak kayıt bulunamadı.');
+      return;
+    }
+
+    // Deterministic ordering ensures everyone sees the same imported layout.
+    const sorted = LAST_EVENTS.slice().sort((a, b) => {
+      if (a.day !== b.day) return a.day - b.day;
+      const sa = toMinutes(a.start);
+      const sb = toMinutes(b.start);
+      if (sa !== sb) return sa - sb;
+      const ea = toMinutes(a.end);
+      const eb = toMinutes(b.end);
+      if (ea !== eb) return ea - eb;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'tr');
+    });
+
+    const lines = ['name,day,start,end'];
+    for (const e of sorted) {
+      lines.push([
+        csvEscape(e.name),
+        csvEscape(e.day),
+        csvEscape(e.start),
+        csvEscape(e.end)
+      ].join(','));
+    }
+
+    // UTF-8 BOM helps Excel open Turkish characters correctly.
+    const csv = '\uFEFF' + lines.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+    a.href = url;
+    a.download = `ai4sg_takvim_disar_aktar_${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+}
+
 /* -------- App lifecycle -------- */
 async function refresh() {
   const events = await fetchEvents();
@@ -407,6 +460,7 @@ async function main() {
   buildColumns();
   setupForm();
   setupImportUI();
+  setupExportUI();
   await refresh();
 }
 
